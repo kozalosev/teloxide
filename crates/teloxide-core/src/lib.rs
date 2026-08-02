@@ -115,6 +115,7 @@ pub use self::{
 pub mod adaptors;
 pub mod errors;
 pub mod net;
+pub mod observer;
 pub mod payloads;
 pub mod prelude;
 pub mod requests;
