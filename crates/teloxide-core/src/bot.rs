@@ -1,10 +1,11 @@
-use std::{future::Future, sync::Arc};
+use std::{future::Future, sync::Arc, time::Instant};
 
 use reqwest::Client;
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
     net,
+    observer::{RequestBody, RequestObservation, RequestObserver},
     requests::{MultipartPayload, Payload, ResponseResult},
     serde_multipart,
 };
@@ -53,11 +54,13 @@ const TELOXIDE_API_URL: &str = "TELOXIDE_API_URL";
 /// [`Arc`]: std::sync::Arc
 /// [Telegram Bot API]: https://core.telegram.org/bots/api
 #[must_use]
-#[derive(Debug, Clone)]
+#[derive(Clone, derive_more::Debug)]
 pub struct Bot {
     token: Arc<str>,
     api_url: Arc<reqwest::Url>,
     client: Client,
+    #[debug("{}", observer.is_some())]
+    observer: Option<Arc<dyn RequestObserver>>,
 }
 
 /// Constructors
@@ -97,7 +100,7 @@ impl Bot {
                 .expect("Failed to parse the default TBA URL"),
         );
 
-        Self { token, api_url, client }
+        Self { token, api_url, client, observer: None }
     }
 
     /// Creates a new `Bot` with the `TELOXIDE_TOKEN` & `TELOXIDE_API_URL` &
@@ -199,6 +202,18 @@ impl Bot {
         self.api_url = Arc::new(url);
         self
     }
+
+    /// Sets an observer that is called for every request this bot makes.
+    ///
+    /// Like [`Bot::set_api_url`], this method only affects one bot instance;
+    /// older clones keep the observer they were cloned with.
+    pub fn set_observer<O>(mut self, observer: O) -> Self
+    where
+        O: RequestObserver,
+    {
+        self.observer = Some(Arc::new(observer));
+        self
+    }
 }
 
 /// Getters
@@ -234,6 +249,7 @@ impl Bot {
         let client = self.client.clone();
         let token = Arc::clone(&self.token);
         let api_url = Arc::clone(&self.api_url);
+        let observer = self.observer.clone();
 
         let timeout_hint = payload.timeout_hint();
         let params = stacker::maybe_grow(256 * 1024, 1024 * 1024, || serde_json::to_vec(payload))
@@ -242,7 +258,8 @@ impl Bot {
 
         // async move to capture client&token&api_url&params
         async move {
-            net::request_json(
+            let observation = start_observation(&observer, P::NAME, RequestBody::Json(&params));
+            let res = net::request_json(
                 &client,
                 token.as_ref(),
                 reqwest::Url::clone(&*api_url),
@@ -250,7 +267,9 @@ impl Bot {
                 params,
                 timeout_hint,
             )
-            .await
+            .await;
+            finish_observation(observation, &res);
+            res
         }
     }
 
@@ -265,6 +284,7 @@ impl Bot {
         let client = self.client.clone();
         let token = Arc::clone(&self.token);
         let api_url = Arc::clone(&self.api_url);
+        let observer = self.observer.clone();
 
         let timeout_hint = payload.timeout_hint();
         let params = serde_multipart::to_form(payload);
@@ -272,7 +292,8 @@ impl Bot {
         // async move to capture client&token&api_url&params
         async move {
             let params = params?.await;
-            net::request_multipart(
+            let observation = start_observation(&observer, P::NAME, RequestBody::Multipart);
+            let res = net::request_multipart(
                 &client,
                 token.as_ref(),
                 reqwest::Url::clone(&*api_url),
@@ -280,7 +301,9 @@ impl Bot {
                 params,
                 timeout_hint,
             )
-            .await
+            .await;
+            finish_observation(observation, &res);
+            res
         }
     }
 
@@ -295,6 +318,7 @@ impl Bot {
         let client = self.client.clone();
         let token = Arc::clone(&self.token);
         let api_url = self.api_url.clone();
+        let observer = self.observer.clone();
 
         let timeout_hint = payload.timeout_hint();
         let params = serde_multipart::to_form_ref(payload);
@@ -302,7 +326,8 @@ impl Bot {
         // async move to capture client&token&api_url&params
         async move {
             let params = params?.await;
-            net::request_multipart(
+            let observation = start_observation(&observer, P::NAME, RequestBody::Multipart);
+            let res = net::request_multipart(
                 &client,
                 token.as_ref(),
                 reqwest::Url::clone(&*api_url),
@@ -310,8 +335,31 @@ impl Bot {
                 params,
                 timeout_hint,
             )
-            .await
+            .await;
+            finish_observation(observation, &res);
+            res
         }
+    }
+}
+
+/// Starts the clock and asks the observer, if any, for an observation to hold
+/// across the request.
+fn start_observation(
+    observer: &Option<Arc<dyn RequestObserver>>,
+    method: &'static str,
+    body: RequestBody<'_>,
+) -> Option<(Box<dyn RequestObservation>, Instant)> {
+    observer.as_ref().map(|observer| (observer.on_request(method, body), Instant::now()))
+}
+
+/// Reports the outcome of a request to the observation [`start_observation`]
+/// returned.
+fn finish_observation<T>(
+    observation: Option<(Box<dyn RequestObservation>, Instant)>,
+    res: &ResponseResult<T>,
+) {
+    if let Some((observation, started_at)) = observation {
+        observation.on_response(started_at.elapsed(), res.as_ref().map(|_| ()));
     }
 }
 
