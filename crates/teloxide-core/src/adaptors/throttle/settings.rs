@@ -1,10 +1,11 @@
-use std::pin::Pin;
+use std::{pin::Pin, time::Duration};
 
 use futures::{future::ready, Future};
 
 // Required to not trigger `clippy::type-complexity` lint
 type BoxedFnMut<I, O> = Box<dyn FnMut(I) -> O + Send>;
 type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+type BoxedWaitFn = Box<dyn FnMut(ThrottledChatKind, Duration) + Send>;
 
 /// Settings used by [`Throttle`] adaptor.
 ///
@@ -25,9 +26,30 @@ type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 #[non_exhaustive]
 pub struct Settings {
     pub limits: Limits,
+    /// Called when requests that are allowed to be sent to their chats are
+    /// still waiting because the overall limit
+    /// ([`Limits::messages_per_sec_overall`]) is used up. Gets the number of
+    /// pending requests. Called at most once every 4 seconds.
     pub on_queue_full: BoxedFnMut<usize, BoxedFuture>,
+    /// Called for every request the worker lets through, with the kind of its
+    /// chat and the time it waited in the throttle.
+    pub on_wait: BoxedWaitFn,
     pub retry: bool,
     pub check_slow_mode: bool,
+    /// How many chats refused with `RetryAfter` at the same time freeze the
+    /// whole bot rather than only themselves. A single refusal is about its
+    /// own chat, but several at once suggest the bot-wide limit. `1` freezes
+    /// the bot on every refusal, `0` never.
+    pub global_freeze_chats: u32,
+}
+
+/// The kind of chat a throttled request is sent to.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[non_exhaustive]
+pub enum ThrottledChatKind {
+    Private,
+    Group,
+    ChannelOrSupergroup,
 }
 
 /// Telegram request limits.
@@ -69,6 +91,19 @@ impl Settings {
         self
     }
 
+    pub fn on_wait<F>(mut self, val: F) -> Self
+    where
+        F: FnMut(ThrottledChatKind, Duration) + Send + 'static,
+    {
+        self.on_wait = Box::new(val);
+        self
+    }
+
+    pub fn global_freeze_chats(mut self, val: u32) -> Self {
+        self.global_freeze_chats = val;
+        self
+    }
+
     pub fn no_retry(mut self) -> Self {
         self.retry = false;
         self
@@ -88,8 +123,10 @@ impl Default for Settings {
                 log::warn!("Throttle queue is full ({pending} pending requests)");
                 Box::pin(ready(()))
             }),
+            on_wait: Box::new(|_, _| {}),
             retry: true,
             check_slow_mode: false,
+            global_freeze_chats: 3,
         }
     }
 }

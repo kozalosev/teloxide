@@ -10,12 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `MessageToEditHasNoText` variant to `ApiError` ([#1426](https://github.com/teloxide/teloxide/issues/1426))
 - `ParticipantIdInvalid` and `ChatAdminRequired` variants to `ApiError` ([#1349](https://github.com/teloxide/teloxide/issues/1349))
+- `Settings::on_wait`, called with the chat's kind (`ThrottledChatKind`) and the time a request waited in the `Throttle` adaptor
+- `Settings::global_freeze_chats`: how many chats refused with `RetryAfter` at once freeze the whole bot
 - Support for TBA 9.2 ([#1403](https://github.com/teloxide/teloxide/pull/1403))
   - Add `filter_suggested_post_approved`, `filter_suggested_post_approval_failed`, `filter_suggested_post_declined`, `filter_suggested_post_paid`, `filter_suggested_post_refunded` filters to the `MessageFilterExt` trait
   - `ChatFullInfoPublicKind::Supergroup` is now of type `Box<ChatFullInfoPublicSupergroup>` instead of `ChatFullInfoPublicSupergroup` [**BC**]
 
 ### Fixed
 
+- `Throttle::limits` and `Throttle::set_limits` are answered while the worker waits for requests, instead of after the next request arrives
 - Make sure `postgres-storage-rustls` feature actually enables rustls-based postgres storage ([#1400](https://github.com/teloxide/teloxide/pull/1400))
 - Escape `@` mentions in `markdown::user_mention_or_link` ([#1411](https://github.com/teloxide/teloxide/pull/1411))
 - Add local TBA file downloading support in `crate::net::download` ([#1173](https://github.com/teloxide/teloxide/pull/1173))
@@ -39,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A `RetryAfter` error in the `Throttle` adaptor freezes only the chat it came from, not the whole bot, unless `Settings::global_freeze_chats` chats are refused at once
+- A chat over its limits in the `Throttle` adaptor no longer holds back the requests to other chats: pending requests are queued per chat, and `on_queue_full` is called when the overall limit is what keeps them waiting
 - Some dependencies were bumped: `derive_more` to `2.0.1`, `deadpool-redis` to `0.22.0` ([#1408](https://github.com/teloxide/teloxide/pull/1408))
 
 ## 0.17.0 - 2025-07-11
