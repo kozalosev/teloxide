@@ -22,12 +22,12 @@ use tokio::sync::{
 use crate::{errors::AsResponseParameters, requests::Requester, types::*};
 
 use self::{
-    request_lock::{channel, RequestLock},
-    worker::{worker, FreezeUntil, InfoMessage},
+    request_lock::channel,
+    worker::{worker, FreezeUntil, InfoMessage, QueuedRequest},
 };
 
 pub use request::{ThrottlingRequest, ThrottlingSend};
-pub use settings::{Limits, Settings};
+pub use settings::{Limits, Settings, ThrottledChatKind};
 
 /// Automatic request limits respecting mechanism.
 ///
@@ -73,8 +73,8 @@ pub use settings::{Limits, Settings};
 #[derive(Clone, Debug)]
 pub struct Throttle<B> {
     bot: B,
-    // `RequestLock` allows to unlock requests (allowing them to be sent).
-    queue: mpsc::Sender<(ChatIdHash, RequestLock)>,
+    // `QueuedRequest::lock` allows to unlock requests (allowing them to be sent).
+    queue: mpsc::Sender<QueuedRequest>,
     info_tx: mpsc::Sender<InfoMessage>,
 }
 
@@ -189,6 +189,14 @@ impl ChatIdHash {
         match self {
             &Self::Id(id) => id.is_channel_or_supergroup(),
             Self::ChannelUsernameHash(_) => true,
+        }
+    }
+
+    fn kind(&self) -> ThrottledChatKind {
+        match self {
+            &Self::Id(id) if id.is_user() => ThrottledChatKind::Private,
+            &Self::Id(id) if id.is_group() => ThrottledChatKind::Group,
+            Self::Id(_) | Self::ChannelUsernameHash(_) => ThrottledChatKind::ChannelOrSupergroup,
         }
     }
 }
