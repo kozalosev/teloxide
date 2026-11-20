@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed 
 
+- `ChatFullInfoPrivate` and `ChatFullInfoPublicChannel` now have the `active_usernames` field, which was dropped on deserialization; `ChatFullInfo::active_usernames` returns it for private chats, supergroups and channels
+
 - Add local TBA file downloading support in `crate::net::download` ([#1173](https://github.com/teloxide/teloxide/pull/1173))
 
 - Added schema and rust types checking ([#1396](https://github.com/teloxide/teloxide/pull/1396))

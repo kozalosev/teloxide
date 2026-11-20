@@ -151,6 +151,10 @@ pub struct ChatFullInfoPrivate {
     /// available.
     pub username: Option<String>,
 
+    /// If non-empty, the list of all active chat usernames; for private chats,
+    /// supergroups and channels.
+    pub active_usernames: Option<Vec<String>>,
+
     /// A first name of the other party in a private chat.
     pub first_name: Option<String>,
 
@@ -204,6 +208,10 @@ pub enum ChatFullInfoPublicKind {
 pub struct ChatFullInfoPublicChannel {
     /// A username, for private chats, supergroups and channels if available.
     pub username: Option<String>,
+
+    /// If non-empty, the list of all active chat usernames; for private chats,
+    /// supergroups and channels.
+    pub active_usernames: Option<Vec<String>>,
 
     /// Unique identifier for the linked chat, i.e. the discussion group
     /// identifier for a channel and vice versa.
@@ -378,6 +386,20 @@ impl ChatFullInfo {
                 ChatFullInfoPublicKind::Group(_) => None,
             },
             ChatFullInfoKind::Private(this) => this.username.as_deref(),
+        }
+    }
+
+    /// If non-empty, the list of all active chat usernames; for private chats,
+    /// supergroups and channels.
+    #[must_use]
+    pub fn active_usernames(&self) -> Option<&[String]> {
+        match &self.kind {
+            ChatFullInfoKind::Public(this) => match &this.kind {
+                ChatFullInfoPublicKind::Channel(this) => this.active_usernames.as_deref(),
+                ChatFullInfoPublicKind::Supergroup(this) => this.active_usernames.as_deref(),
+                ChatFullInfoPublicKind::Group(_) => None,
+            },
+            ChatFullInfoKind::Private(this) => this.active_usernames.as_deref(),
         }
     }
 
@@ -632,6 +654,7 @@ mod serde_helper {
         r#type: Type,
 
         username: Option<String>,
+        active_usernames: Option<Vec<String>>,
         first_name: Option<String>,
         last_name: Option<String>,
         bio: Option<String>,
@@ -651,6 +674,7 @@ mod serde_helper {
             ChatPrivateFullInfo {
                 r#type: _,
                 username,
+                active_usernames,
                 first_name,
                 last_name,
                 bio,
@@ -665,6 +689,7 @@ mod serde_helper {
         ) -> Self {
             Self {
                 username,
+                active_usernames,
                 first_name,
                 last_name,
                 bio,
@@ -683,6 +708,7 @@ mod serde_helper {
         fn from(
             super::ChatFullInfoPrivate {
                 username,
+                active_usernames,
                 first_name,
                 last_name,
                 bio,
@@ -698,6 +724,7 @@ mod serde_helper {
             Self {
                 r#type: Type::Private,
                 username,
+                active_usernames,
                 first_name,
                 last_name,
                 bio,
@@ -727,6 +754,7 @@ mod tests {
                 title: None,
                 kind: ChatFullInfoPublicKind::Channel(ChatFullInfoPublicChannel {
                     username: Some("channel_name".into()),
+                    active_usernames: Some(vec!["channel_name".into(), "other_name".into()]),
                     linked_chat_id: None,
                     can_send_paid_media: false,
                 }),
@@ -760,6 +788,7 @@ mod tests {
                 "id": -1,
                 "type": "channel",
                 "username": "channel_name",
+                "active_usernames": ["channel_name", "other_name"],
                 "available_reactions": [
                     {
                         "type": "emoji",
@@ -786,6 +815,7 @@ mod tests {
             id: ChatId(0),
             kind: ChatFullInfoKind::Private(Box::new(ChatFullInfoPrivate {
                 username: Some("username".into()),
+                active_usernames: Some(vec!["username".into(), "other_username".into()]),
                 first_name: Some("Anon".into()),
                 last_name: None,
                 bio: None,
@@ -825,6 +855,7 @@ mod tests {
                     "id": 0,
                     "type": "private",
                     "username": "username",
+                    "active_usernames": ["username", "other_username"],
                     "first_name": "Anon",
                     "emoji_status_expiration_date": 1720708004,
                     "max_reaction_count": 0,
@@ -846,6 +877,7 @@ mod tests {
             id: ChatId(0),
             kind: ChatFullInfoKind::Private(Box::new(ChatFullInfoPrivate {
                 username: Some("username".into()),
+                active_usernames: Some(vec!["username".into(), "other_username".into()]),
                 first_name: Some("Anon".into()),
                 last_name: None,
                 bio: None,
